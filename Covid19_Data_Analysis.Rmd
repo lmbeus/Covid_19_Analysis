@@ -10,8 +10,12 @@ library(knitr)
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE,message=FALSE)
 opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
 ```
+Please make sure to have tinytext installed otherwise it will not knit properly.
 
-Introduction:
+<br><br>
+
+
+# Introduction
 
 The Covid-19 pandemic was devastating and will have a long lasting effect on the world. However, it presents us with a unique opportunity to use data to better understand how our response to the spread of covid-19 affected the number of cases and deaths and how we might be able to better respond in the future.
 
