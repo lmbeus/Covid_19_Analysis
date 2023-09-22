@@ -1,0 +1,290 @@
+---
+title: "Covid-19 Data Analysis"
+author: "Loic Beus"
+date: "2023-09-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE,message=FALSE)
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+
+Introduction:
+
+The Covid-19 pandemic was devastating and will have a long lasting effect on the world. However, it presents us with a unique opportunity to use data to better understand how our response to the spread of covid-19 affected the number of cases and deaths and how we might be able to better respond in the future.
+
+<br><br>
+
+The data we will be analyzing can be found here: https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/
+
+<br><br>
+
+The data we are looking at contains information on the confirmed cases and confirmed death by country throughout the globe and also specifically within the USA and its 50 states. Using this data we will be looking at how the number of cases and deaths changed over time from the beginning of Covid-19 to the "end" of our data set.
+
+
+```{r Import_Libraries}
+#Import needed libraries
+library(tidyr)
+library(dplyr)
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r Import_Data}
+#Import the data sets
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <- c("time_series_covid19_confirmed_US.csv", "time_series_covid19_deaths_US.csv","time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv")
+urls <- str_c(url_in, file_names)
+US_cases <- read_csv(urls[1])
+US_deaths <- read_csv(urls[2])
+global_cases <- read_csv(urls[3])
+global_deaths <- read_csv(urls[4])
+```
+
+```{r}
+#Clean and organize each data set to give us numbers by date
+US_cases <- US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(Province_State:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+global_cases <- global_cases %>%
+  pivot_longer(cols = -(`Province/State`:Long),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(`Country/Region`:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long))
+
+global_deaths <- global_deaths %>%
+  pivot_longer(cols = -c(`Province/State`:Long), 
+               names_to = "date",
+               values_to = "deaths") %>%
+  mutate(date = as.character(date)) %>%  # Convert date to character
+  select(`Country/Region`:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long))
+
+#remove any values less than 0 as these are incorrect data points
+US_cases <- US_cases %>% filter(cases >= 0)
+US_deaths <- US_deaths %>% filter(deaths >= 0)
+global_cases <- global_cases %>% filter(cases >= 0)
+global_deaths <- global_deaths %>% filter(deaths >= 0)
+```
+
+## Exploratory Analysis
+
+<br><br>
+
+Here we will begin our exploratory analysis of the data to identify any general trends and anything that catches our interest. We will look at the number of cases as well as deaths over time for the USA and and compare it to the average across the globe. This following section we will be organizing and setting up the data for the analysis that we will conduct, ensuring we have all the information we want and none that we don't while splitting up and orgnanizing the data in a way that will make it easy for us to look at specific parts we are interested in.
+
+<br><br>
+
+```{r Set up data for analysis}
+#Get the average death's for each time frame across the globe
+cases_country <- global_cases %>%
+  group_by(`Country/Region`,Month = lubridate::floor_date(date,"month")) %>%
+  summarize(Cases = max(cases))
+
+deaths_country <- global_deaths %>%
+  group_by(`Country/Region`,Month = lubridate::floor_date(date,"month")) %>%
+  summarize(Deaths = max(deaths))
+
+cases_US <- US_cases %>%
+  group_by(Month = lubridate::floor_date(date,"month")) %>%
+  summarize(Cases = as.integer(max(cases)))
+
+deaths_US <- US_deaths %>%
+  group_by(Month = lubridate::floor_date(date,"month")) %>%
+  summarize(Deaths = as.integer(max(deaths)))
+
+avg_world_cases <- cases_country %>%
+  group_by(Month) %>%
+  summarize(avg_Cases = mean(Cases))
+
+avg_world_deaths <- deaths_country %>%
+  group_by(Month) %>%
+  summarize(avg_Deaths = mean(Deaths))
+
+#combine the data frames of cases and deaths
+world <- merge(cases_country, deaths_country, by=c("Country/Region","Month"))
+USA <- merge(cases_US,deaths_US,by = "Month")
+avg_world <- merge(avg_world_cases,avg_world_deaths, by = "Month")
+
+#Calculate Deaths per 1000 Cases
+world$`Deaths per 1000 Cases` <- world$Deaths*1000/world$Cases
+USA$`Deaths per 1000 Cases` <- USA$Deaths*1000/USA$Cases
+avg_world$`Deaths per 1000 Cases` <- avg_world$avg_Deaths*1000/avg_world$avg_Cases
+
+world$`Cases (Thousands)` <- world$Cases/1000
+USA$`Cases (Thousands)` <- USA$Cases/1000
+avg_world$`Cases (Thousands)` <- avg_world$avg_Cases/1000
+
+df_all <- avg_world
+df_all$USA_Cases <- USA$Cases
+df_all$USA_Deaths <- USA$Deaths
+df_all$USA_Deaths_per_Thousands <- USA$`Deaths per 1000 Cases`
+#Total cases
+total_country <- global_cases %>%
+  group_by(`Country/Region`) %>%
+  summarize(Total_Cases = max(cases))
+
+#Total deaths
+total_deaths <- global_deaths %>%
+  group_by(`Country/Region`) %>%
+  summarize(Total_Deaths = max(deaths))
+```
+
+## Total Cases and Deaths
+
+<br><br>
+
+Here we will be creating some exploratory plots and analysis of the data to get a basic idea of what we are looking at and what exactly we might want to look at.
+
+```{r exploratory plots}
+#Select specific countries to look at
+keep <- c("US","India","China","Russia","Japan","France","United Kingdom",
+          "Belgium","Indonesia","Netherlands")
+total_spec <- total_country[total_country$`Country/Region` %in% keep,]
+deaths_spec <- total_deaths[total_deaths$`Country/Region` %in% keep,]
+
+#Plot total cases for selection of countries
+ggplot(total_spec,aes(`Country/Region`,`Total_Cases`,fill=`Country/Region`)) +
+  geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 90))
+
+ggplot(deaths_spec,aes(`Country/Region`,`Total_Deaths`,fill=`Country/Region`)) +
+  geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 90))
+```
+
+These plots of the total cases and total deaths for some selected countries are very interesting. the US is shown to have the highest number of total cases (as of March 2023) and highest number of total deaths. Compared to most of the countries it makes sense; the US does have a larger population. However, China has a population of over 1.4 billion yet has the lowest reported number of deaths and cases. Russia also has around 143 million people, which is a little under half of the US's ~322 million but records less than a quarter the deaths as the USA and less than half the cases. This begs the question, did the US handle Covid-19 so badly or did the US just do a much better job tracking and recording cases? The latter seems more likely, especially in the case of China due to their large population and secretive/isolationist nature, but we don't have the data or the means to prove any of that.
+
+<br><br>
+
+That is one of the challenges of comparing countries with data like this, it relies heavily on each country to accurately and consistently report their cases and deaths. And it is often in a countries best interest to make things seem like they are better than they really are. Regardless, these numbers are interesting to see.
+
+<br><br>
+
+Next we plot the total running cases and deaths in the USA and compare it to the average across the world to see how the spread of Covid-19 changed over time. The goal of this particular plot is to focus more on the slope of the plot to see how the spread increased or slowed as the years went by.
+
+<br><br>
+
+## Cases and Deaths Over Time
+```{r over_time}
+#Plot the number of cases vs date in USA vs the world average
+plot(avg_world$Month,avg_world$avg_Cases,col='gray',ylim=c(0,3600000),
+     xlab="Year",ylab="Cumulative Cases")
+points(USA$Month,USA$Cases, col='red')
+legend('topleft',legend=c("USA","World Average"),
+       fill = c("red","gray"))
+#Plot the number of deaths vs date in USA vs the world average
+plot(avg_world$Month,avg_world$avg_Deaths,col='gray',ylim=c(0,40000),
+     xlab="Year",ylab="Cumulative Deaths")
+points(USA$Month,USA$Deaths, col='red')
+legend('topleft',legend=c("USA","World Average"),
+       fill = c("red","gray"))
+
+```
+<br><br>
+
+From the plots above we can see that the USA outpaced the world average number of Covid-19 cases since its inception. Keep in mind this is assuming the reported the numbers for each country are accurate.  In 2021 we can see that there is a rather large spike, and then it levels off a little bit than increases to another large spike in 2022. This could be in part to the emergence of new strains that were more contagious and resistant to vaccines available at the time. The cumulative deaths don't quite follow the same trend as the cases interestingly enough. We can see that there was a large spike in early 2020 and another large spike in 2021, but no spike in 2022 with the rise in cases. Perhaps the newer strains had a lower fatality rate or the vaccines were more effective at reducing the severity of the case when the virus was contracted.
+
+<br><br>
+
+We want to take a deeper look into this and plot the number of cases vs the number of deaths, focusing on the USA. We will also create a linear model comparing the number of cases to the number of deaths. From the plots above it would seem that the number of deaths doesn't rise 1:1 with the rise in cases, rather the number of deaths taper off and slow down compared to the increase in cases.
+
+```{r deaths_vs_cases}
+#Plot deaths vs cases
+plot(USA$Cases, USA$Deaths,col='red',xlab="Cases",ylab="Deaths")
+```
+<br><br>
+
+We can see the same two spikes in deaths that match the two spikes from the earlier deaths vs time plot, as well as the spikes (horizontally) for the cases that match the earlier plots as well. As with our previous hypothesis the increase in deaths slows down compared to the increase in cases starting around the 1,000,000 cases mark. Like we mentioned above, this could be due to vaccines making the virus less lethal when contracted as well as later strains potentially being more contagious but with a lower fatality rate. In the next portion of the analysis we will be creating a linear model of our data.
+
+## Linear Model and Prediction
+
+```{r regression_model}
+#Keep only the data we need
+USA_df <- subset(USA, select = c("Cases","Deaths"))
+#Create linear model
+lm_US <- lm(`Deaths` ~ poly(`Cases`,3, raw=TRUE),data=USA_df)
+summary(lm_US)
+pred <- predict(lm_US)
+ix <- sort(USA_df$Cases, index.return=T)$ix
+
+plot(USA_df$Cases, USA_df$Deaths,col='red',xlab="Cases", ylab="Deaths")
+lines(USA_df$Cases[ix], pred[ix], col='blue',lwd=2)
+```
+
+Here we created a 3rd order polynomial linear model to fit to our data. We've got an R-squared value of .97 and a p-value of essentially 0 (2.2e-16). All this tell us is that our model fits the data pretty well and can explain most of the variability in the data and that the number of cases is statistically significant in its affect on the number of deaths, which is kind of a given. What the model could be useful for is predicting what the number of deaths might be based on the number of cases. This can be done by training our model and then attempting to use it to predict that number. In the following code we will test our model's predictive ability using a training and a test set using a 3rd order polynomial model like we did above.
+
+<br><br>
+
+```{r}
+#Create training and test data sets
+USA_df <- subset(USA, select = c("Cases","Deaths"))
+USA_df$id <- 1:nrow(USA)
+train <- USA_df %>%
+  sample_frac(0.70)
+test <- anti_join(USA_df,train, by='id')
+
+train_lm <- lm(`Deaths` ~ poly(`Cases`,3, raw=TRUE),data=train)
+test_predict <- predict(train_lm, newdata = test)
+
+plot(test$Cases, test$Deaths, col='blue')
+points(test$Cases,test_predict, col='red')
+```
+
+We can see that our model isn't too bad. We have the actual data in blue and our models predictions in red. It doesn't follow the jumps in the real data perfectly but it has does follow the general trend and as we saw in the actual data above the data appears to be mellowing out in terms of deaths as more covid cases arise. Now that we are satisfied with our model's predictive capability lets predict what the total number of deaths will be when the USA hits a total of 4,500,000 cases. As of 3/2023 according to our data set it was at 3,710,586 cases. We are going to create some fake "new" data where the cases rise by 22,000 every month onward for 1 year from the last month in our actual data set. We could make a new model to predict what the number of cases will be at those dates, but in the interest of time for the sake of simplicity we will forego that this time around.
+
+<br><br>
+
+```{r predictions}
+#Create new data by populating a list of length 12 (each element is a new month containing a number of cases)
+base <- 3710586
+new <- numeric(12)
+for (i in 1:12) {
+  new[i] <- base+22000*i
+}
+
+#predict the total number of deaths for each number of cases
+pred_deaths <- predict(lm_US, newdata = data.frame(Cases = new))
+
+#plot the predicted deaths for the number of cases
+plot(new, pred_deaths)
+
+#tack on new plot to original data plot
+new_data <- data.frame(Cases = new, Deaths = pred_deaths)
+#predicted_data <- rbind(USA_df, new_data)
+plot(USA_df$Cases, USA_df$Deaths,xlim=c(0,4100000),col='red',xlab="Cases", ylab="Deaths")
+points(new_data$Cases,new_data$Deaths, col='blue')
+```
+
+From the plot above we can see what our predicted number of deaths will be based on a pseudo number of cases. It would be much better to also predict the number of cases for the next 12 months and use those values to predict the number of associated deaths. But for our purposes we just wanted to test our models predictive ability of just deaths vs cases. We have no way of knowing if these predicted values are correct until new data releases that we can compare it to. But based on our models r-squared value and the training model we ran we think that it isn't too bad of a prediction.
+
+<br><br>
+
+## Conclusion
+
+<br><br>
+
+Based on our analysis of the given data we can conclude that the rate at which Covid-19 is spreading as of march 2023 has slowed down compared to past months/years, and the number of deaths per case seem to be slowing down as well. This could be due to the most recent vaccines being especially effective at both preventing the contraction of the virus and also making it less lethal when contracted. In addition, new strains or the current more prominent strains could potentially have lower fatality rates as well. At this point in the pandemic lots of people have already had the virus which increases their body's ability to fight it should they encounter it again, thus lowering the both the contraction rate and the death rate.
+
+<br><br>
+
+Our comparison of a few countries to the USA in terms of total number of cases and total number of deaths is concerning as it puts the USA at much higher total numbers in proportion to its population, especially when comparing to Russia and China. The catch here is that there have been lots of rumors and suspicion that China and Russia don't report well on their numbers, whether that is on purpose to deflate their numbers to look better isn't fully known. So it is important to keep in mind that any conclusions need to be taken with a grain of salt as it is strongly dependent on a country's ability to report accurate numbers.
+
+
